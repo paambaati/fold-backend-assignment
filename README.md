@@ -54,3 +54,5 @@ Once this is working, we build a Lambda API that queries OpenSearch according to
 1. Newer AWS infrastructure is infamously hard to develop against (especially in a 3-day window), and DMS, although well documented, does not seem like a particularly well known product. I might be stuck in IAM/Network ACL hell, so better to timebox each task.
 
 2. Unclear how exactly the DMS OpenSearch target endpoint will handle CDC operations, and how easily it is to control indexing and record transformation (if need be). If this is too complex, we'd be better off writing a Kinesis target endpoint and a Lambda consumer that handles the OpenSearch syncing.
+
+3. RDS and OpenSearch are notoriously slow to provision, so development might slow down, especially when recreating resources.
