@@ -56,3 +56,30 @@ Once this is working, we build a Lambda API that queries OpenSearch according to
 2. Unclear how exactly the DMS OpenSearch target endpoint will handle CDC operations, and how easily it is to control indexing and record transformation (if need be). If this is too complex, we'd be better off writing a Kinesis target endpoint and a Lambda consumer that handles the OpenSearch syncing.
 
 3. RDS and OpenSearch are notoriously slow to provision, so development might slow down, especially when recreating resources.
+
+## Development Log
+
+### Day 1 (2023 March 06)
+
+1. Design and document approaches and implementation draft (~ 1 hour).
+
+2. Set up SST bootstrap repository (~30 minutes).
+
+3. Start reading about and setting up DMS (~4 hours).
+
+    1. Set up RDS (~ 15 minutes).
+
+    2. Set up DMS source & target endpoints and replicator instance manually and test them out (~ 2 hours).
+
+        a. Turn on logical replication on RDS for DMS.
+
+        b. Create PG source endpoint and make sure it can connect.
+
+        c. Create OpenSearch target endpoint and make sure it can connect.
+
+        d. Create replication task that connects source endpoint to target endpoint.
+
+    3. SNAG: DMS engine 3.4.7 would not work correctly with security boundaries. (~2 hours).
+    
+        FIX: Downgrade to 3.4.6 means we need to downgrade PostgreSQL to 13.x as well, as support for PostgreSQL 14.x was added only in DMS engine 3.4.7 – see https://docs.aws.amazon.com/dms/latest/userguide/CHAP_ReleaseNotes.html#CHAP_ReleaseNotes.DMS346 (~ 2 hours).
+
