@@ -44,13 +44,13 @@ Once this is working, we build a Lambda API that queries OpenSearch according to
 
 #### Tasks
 
-1. Bootstrap a [SST](https://sst.dev) project
+1. Bootstrap an [SST](https://sst.dev) project
 2. Create RDS and DMS constructs
 3. Verify that DMS source and target endpoints work
 4. Build API endpoint to query OpenSearch
 
 #### Risks
 
-1. Newer AWS infrastructure is infamously hard to develop against (especially in a 3-day window), and DMS, although well documented, does not seem like a particularly well known product.
+1. Newer AWS infrastructure is infamously hard to develop against (especially in a 3-day window), and DMS, although well documented, does not seem like a particularly well known product. I might be stuck in IAM/Network ACL hell, so better to timebox each task.
 
-2. Unclear how exactly the DMS OpenSearch target endpoint will handle CDC operations, and how easily it is to control indexing and record transformation (if need be). If this is too complex, we'd be better off writing a Kinesis target endpoint and a Lambda consumer that handles the OpenSearch syncing. 
+2. Unclear how exactly the DMS OpenSearch target endpoint will handle CDC operations, and how easily it is to control indexing and record transformation (if need be). If this is too complex, we'd be better off writing a Kinesis target endpoint and a Lambda consumer that handles the OpenSearch syncing.
