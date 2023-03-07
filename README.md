@@ -83,3 +83,25 @@ Once this is working, we build a Lambda API that queries OpenSearch according to
     
         FIX: Downgrade to 3.4.6 means we need to downgrade PostgreSQL to 13.x as well, as support for PostgreSQL 14.x was added only in DMS engine 3.4.7 – see https://docs.aws.amazon.com/dms/latest/userguide/CHAP_ReleaseNotes.html#CHAP_ReleaseNotes.DMS346 (~ 2 hours).
 
+
+### Day 2 (2023 March 07)
+
+1. Set up core resources in SST stack, including VPC + SG, RDS, DMS, Lambda functions (~1.5 hours).
+
+2. Quick spike of DMS using new infra brought up by SST stack (~3 hours).
+
+    Had to adjust VPC and security groups.
+
+    SNAG: Hit a Terraform (or is it AWS?) bug – see https://github.com/hashicorp/terraform-provider-aws/issues/7602. Basically Terraform would keep placing the DMS replicator task in the default VPC and not the one we created.
+
+    ~~FIX~~ WORKAROUND: For now skip DMS replication instance provisioning via CDK/SST and do it manually.
+
+3. Turn on replication (~1 hour).
+
+    Tried to write a initializer script that would automatically install the `pglogical` extension on RDS.
+
+    SNAG: Took too long, especially with RDS creation/re-creation cycles.
+
+    ~~FIX~~ WORKROUND: The extension installation is being done manually via directly-executed SQL.
+
+4. Revisit previous assumptions (~30 minutes).
