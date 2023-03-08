@@ -57,6 +57,10 @@ Once this is working, we build a Lambda API that queries OpenSearch according to
 
 3. RDS and OpenSearch are notoriously slow to provision, so development might slow down, especially when recreating resources.
 
+> **Note**
+
+> See [final implementation](#final-implementation) to see how the project was built in the end.
+
 ## Usage
 
 ### Prerequisites
@@ -108,6 +112,18 @@ Once this is working, we build a Lambda API that queries OpenSearch according to
     ```bash
     npm run remove
     ```
+
+## Final Implementation
+
+1. PostgreSQL 13.x as data source on RDS (with logical replication turned on).
+
+2. AWS DMS is configured to continously replicate changes on PostgreSQL ("source") to a Kinesis data stream ("target").
+
+    The AWS DMS replication instance is currently set up manually because of a long-standing Terraform (or perhaps AWS) bug – see https://github.com/hashicorp/terraform-provider-aws/issues/7602
+
+3. The DMS target has a Lambda handler function that decisions each CDC record from DMS and syncs them to OpenSearch.
+
+4. Another Lambda function serves the primary user-facing APIs and queries data from OpenSearch.
 
 ## Development Log
 
