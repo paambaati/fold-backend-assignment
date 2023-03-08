@@ -86,7 +86,7 @@ Once this is working, we build a Lambda API that queries OpenSearch according to
 
 ### Day 2 (2023 March 07)
 
-1. Set up core resources in SST stack, including VPC + SG, RDS, DMS, Lambda functions (~1.5 hours).
+1. Set up core resources in SST stack, including VPC + SG, RDS, DMS, Lambda functions (~1.5 hour).
 
 2. Quick spike of DMS using new infra brought up by SST stack (~3 hours).
 
@@ -105,3 +105,11 @@ Once this is working, we build a Lambda API that queries OpenSearch according to
     ~~FIX~~ WORKROUND: The extension installation is being done manually via directly-executed SQL.
 
 4. Revisit previous assumptions (~30 minutes).
+
+### Day 3 (2023 March 08)
+
+1. Set up OpenSearch domain in SST stack (~45 minutes).
+
+    Had to adjust/re-adjust the fine-grained access policies so that CloudFormation would agree to spin up the domain.
+
+2. Write core logic to filter DMS public schema updates and write them to OpenSearch as documents (~ 2 hours).
