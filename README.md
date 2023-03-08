@@ -113,3 +113,11 @@ Once this is working, we build a Lambda API that queries OpenSearch according to
     Had to adjust/re-adjust the fine-grained access policies so that CloudFormation would agree to spin up the domain.
 
 2. Write core logic to filter DMS public schema updates and write them to OpenSearch as documents (~ 2 hours).
+
+3. Figure out how to cross-join data across indexes (~1 hour).
+
+    SNAG: Some of the documentation is out of date, but from what I can gather, for cross-index join queries to work (previously called relationships to model, well, relationships), looks like a mapping should be set up – https://www.elastic.co/guide/en/elasticsearch/reference/current/joining-queries.html
+
+    Looks like I might not have enough time to do this.
+
+4. Record demo video.
