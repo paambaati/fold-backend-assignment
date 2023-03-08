@@ -57,6 +57,58 @@ Once this is working, we build a Lambda API that queries OpenSearch according to
 
 3. RDS and OpenSearch are notoriously slow to provision, so development might slow down, especially when recreating resources.
 
+## Usage
+
+### Prerequisites
+
+1. Node.js
+
+    This project assumes you have Node.js (>= 16.x) installed. If you do not, please download and install it from https://nodejs.org
+
+2. AWS account and credentials
+
+    You should have AWS credentials set up to run and deploy the project. If you do not, please follow the instructions on https://docs.aws.amazon.com/general/latest/gr/aws-sec-cred-types.html#access-keys-and-secret-access-keys
+
+3. Git
+
+    To clone this project, you will need `git`. If you do not, please follow the instructions on https://github.com/git-guides/install-git
+
+### Steps
+
+1. Clone this project –
+
+    ```bash
+    git clone https://github.com/paambaati/fold-backend-assignment
+    ```
+
+2. Install all dependencies –
+
+    ```bash
+    npm i
+    ```
+
+3. To run and develop locally –
+
+    ```bash
+    npm run dev
+    ```
+
+    > **Note**
+
+    > Note that this _does_ provision everything to AWS, with a live reloading connection set up that proxies all logs to your local console. When you are ready to deploy to production, these same resources are updated accordingly.
+
+4. (Optional) To deploy to production –
+
+    ```bash
+    npm run deploy
+    ```
+
+5. (Optional) To tear down everything –
+
+    ```bash
+    npm run remove
+    ```
+
 ## Development Log
 
 ### Day 1 (2023 March 06)
@@ -120,4 +172,4 @@ Once this is working, we build a Lambda API that queries OpenSearch according to
 
     Looks like I might not have enough time to do this.
 
-4. Record demo video.
+4. Record demo video (~10 minutes).
