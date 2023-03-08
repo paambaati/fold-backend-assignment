@@ -3,11 +3,12 @@ import { Duration, RemovalPolicy, Tags } from 'aws-cdk-lib';
 import { KinesisEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 import { Stream } from 'aws-cdk-lib/aws-kinesis';
 import { Domain, EngineVersion } from 'aws-cdk-lib/aws-opensearchservice';
-import { Role, ServicePrincipal, Policy, PolicyStatement, Effect, ArnPrincipal, AnyPrincipal, PolicyDocument } from 'aws-cdk-lib/aws-iam';
+import { Role, ServicePrincipal, Policy, PolicyStatement, Effect, ArnPrincipal, AnyPrincipal, PolicyDocument, ManagedPolicy } from 'aws-cdk-lib/aws-iam';
 import { Credentials, DatabaseInstanceEngine, DatabaseInstance, PostgresEngineVersion, ParameterGroup } from 'aws-cdk-lib/aws-rds';
 import { InstanceClass, InstanceSize, InstanceType, Vpc, Peer, Port, SecurityGroup, SubnetType, IpAddresses, EbsDeviceVolumeType } from 'aws-cdk-lib/aws-ec2';
 import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
 import { StartingPosition } from 'aws-cdk-lib/aws-lambda';
+import { CfnReplicationSubnetGroup, CfnEndpoint } from 'aws-cdk-lib/aws-dms';
 // import { CdkResourceInitializer } from './resources/initializer';
 // import { DockerImageCode } from 'aws-cdk-lib/aws-lambda';
 
@@ -193,48 +194,48 @@ export function FoldBackendStack({ app, stack }: StackContext) {
     // Create the CDC infra.
     db.grantConnect(new ServicePrincipal('dms.amazonaws.com'));
 
-    // const dmsVpcIamRole = new Role(stack, 'ProjectsDMSVPCManageIamRole', {
-    //     roleName: 'fold-backend-dms-vpc-manage-role',
-    //     description: 'Allow DMS to manage VPC',
-    //     managedPolicies: [
-    //         // REFER: https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/dms_replication_subnet_group
-    //         ManagedPolicy.fromManagedPolicyArn(stack, 'ProjectsDMSVPCManagedPolicyLookup', 'arn:aws:iam::aws:policy/service-role/AmazonDMSVPCManagementRole')
-    //     ],
-    //     assumedBy: new ServicePrincipal('dms.amazonaws.com'),
-    // });
+    const dmsVpcIamRole = new Role(stack, 'ProjectsDMSVPCManageIamRole', {
+        roleName: 'fold-backend-dms-vpc-manage-role',
+        description: 'Allow DMS to manage VPC',
+        managedPolicies: [
+            // REFER: https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/dms_replication_subnet_group
+            ManagedPolicy.fromManagedPolicyArn(stack, 'ProjectsDMSVPCManagedPolicyLookup', 'arn:aws:iam::aws:policy/service-role/AmazonDMSVPCManagementRole')
+        ],
+        assumedBy: new ServicePrincipal('dms.amazonaws.com'),
+    });
 
-    // const dmsSourceEndpoint = new CfnEndpoint(stack, 'ProjectsDMSDBSourceEndpoint', {
-    //     endpointType: 'source',
-    //     engineName: 'postgres',
-    //     resourceIdentifier: 'projects-dms-ep-source-pgsql',
-    //     databaseName: dbName,
-    //     port: dbPort,
-    //     serverName: db.dbInstanceEndpointAddress,
-    //     username: Credentials.fromSecret(dbMasterSecret).username,
-    //     password: Credentials.fromSecret(dbMasterSecret).password?.toString(),
-    //     sslMode: 'require',
-    // });
+    const dmsSourceEndpoint = new CfnEndpoint(stack, 'ProjectsDMSDBSourceEndpoint', {
+        endpointType: 'source',
+        engineName: 'postgres',
+        resourceIdentifier: 'projects-dms-ep-source-pgsql',
+        databaseName: dbName,
+        port: dbPort,
+        serverName: db.dbInstanceEndpointAddress,
+        username: Credentials.fromSecret(dbMasterSecret).username,
+        password: Credentials.fromSecret(dbMasterSecret).password?.toString(),
+        sslMode: 'require',
+    });
 
-    // const dmsTargetEndpoint = new CfnEndpoint(stack, 'ProjectsDMSKinesisTargetEndpoint', {
-    //     endpointType: 'target',
-    //     engineName: 'kinesis',
-    //     resourceIdentifier: 'projects-dms-ep-target-kinesis',
-    //     kinesisSettings: {
-    //         streamArn: stream.streamArn,
-    //         messageFormat: 'json',
-    //         serviceAccessRoleArn: kinesisCDCConsumerRole.roleArn,
-    //     },
-    // });
+    const dmsTargetEndpoint = new CfnEndpoint(stack, 'ProjectsDMSKinesisTargetEndpoint', {
+        endpointType: 'target',
+        engineName: 'kinesis',
+        resourceIdentifier: 'projects-dms-ep-target-kinesis',
+        kinesisSettings: {
+            streamArn: stream.streamArn,
+            messageFormat: 'json',
+            serviceAccessRoleArn: kinesisCDCConsumerRole.roleArn,
+        },
+    });
 
     // NOTE: Need this explicitly set up to make sure the replication instance is put in the correct VPC (i.e. same VPC as database).
     // Why? SEE: https://github.com/hashicorp/terraform-provider-aws/issues/7602
-    // const dmsReplicationSubnetGroup = new CfnReplicationSubnetGroup(stack, 'ProjectsDMSReplicationSubnetGroup', {
-    //     replicationSubnetGroupDescription: 'Subnet group for DMS replication',
-    //     // subnetIds: vpc.publicSubnets.map(s => s.subnetId),
-    //     // TODO: somehow `db.vpc` is still returning only the default VPC :-(
-    //     subnetIds: db.vpc.publicSubnets.map(s => s.subnetId),
-    // });
-    // dmsReplicationSubnetGroup.node.addDependency(dmsVpcIamRole);
+    const dmsReplicationSubnetGroup = new CfnReplicationSubnetGroup(stack, 'ProjectsDMSReplicationSubnetGroup', {
+        replicationSubnetGroupDescription: 'Subnet group for DMS replication',
+        // subnetIds: vpc.publicSubnets.map(s => s.subnetId),
+        // TODO: somehow `db.vpc` is still returning only the default VPC :-(
+        subnetIds: db.vpc.publicSubnets.map(s => s.subnetId),
+    });
+    dmsReplicationSubnetGroup.node.addDependency(dmsVpcIamRole);
 
     // const dmsReplicationInstance = new CfnReplicationInstance(stack, 'ProjectsDMSReplicationInstance', {
     //     replicationInstanceClass: 'dms.t3.micro',
@@ -341,6 +342,7 @@ export function FoldBackendStack({ app, stack }: StackContext) {
     const api = new Api(stack, 'ProjectsApi', {
         defaults: {
             function: {
+                description: 'Lambda function that handles all API calls to Projects data',
                 vpc: undefined,
                 vpcSubnets: undefined,
                 environment: {
