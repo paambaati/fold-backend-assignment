@@ -10,10 +10,12 @@
     "@types/aws-lambda": "8.10.111",
     "@types/node": "18.14.6",
     "@types/elasticsearch": "5.0.40",
-    "sst": "2.1.15"
+    "sst": "2.1.18",
+    "type-fest": "3.6.1"
   },
   "dependencies": {
     "got": "11.8.6",
-    "elastic-builder": "2.18.0"
+    "elastic-builder": "2.18.0",
+    "@aws-sdk/client-secrets-manager": "3.287.0"
   }
 }
