@@ -3,11 +3,11 @@ import { Duration, RemovalPolicy, Tags } from 'aws-cdk-lib';
 import { KinesisEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 import { Stream } from 'aws-cdk-lib/aws-kinesis';
 import { Domain, EngineVersion } from 'aws-cdk-lib/aws-opensearchservice';
-import { Role, ServicePrincipal, Policy, PolicyStatement, Effect, ArnPrincipal, AnyPrincipal, PolicyDocument, ManagedPolicy } from 'aws-cdk-lib/aws-iam';
+import { Role, ServicePrincipal, Policy, PolicyStatement, Effect, ArnPrincipal, AnyPrincipal, ManagedPolicy } from 'aws-cdk-lib/aws-iam';
 import { Credentials, DatabaseInstanceEngine, DatabaseInstance, PostgresEngineVersion, ParameterGroup } from 'aws-cdk-lib/aws-rds';
 import { InstanceClass, InstanceSize, InstanceType, Vpc, Peer, Port, SecurityGroup, SubnetType, IpAddresses, EbsDeviceVolumeType } from 'aws-cdk-lib/aws-ec2';
 import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
-import { StartingPosition } from 'aws-cdk-lib/aws-lambda';
+import { StartingPosition, LayerVersion } from 'aws-cdk-lib/aws-lambda';
 import { CfnReplicationSubnetGroup, CfnEndpoint } from 'aws-cdk-lib/aws-dms';
 // import { CdkResourceInitializer } from './resources/initializer';
 // import { DockerImageCode } from 'aws-cdk-lib/aws-lambda';
@@ -15,10 +15,17 @@ import { CfnReplicationSubnetGroup, CfnEndpoint } from 'aws-cdk-lib/aws-dms';
 // TODO: set this to false when deployment is fired on production.
 const __UNSAFE_ALLOW_OUTSIDE_ACCESS = true as const
 
+// REFER: https://docs.aws.amazon.com/secretsmanager/latest/userguide/retrieving-secrets_lambda.html#retrieving-secrets_lambda_ARNs
+const lambdaSecretsLayerArn = 'arn:aws:lambda:us-east-1:177933569100:layer:AWS-Parameters-and-Secrets-Lambda-Extension-Arm64:4' as const;
+
 export function FoldBackendStack({ app, stack }: StackContext) {
     if (app.stage !== 'prod') {
         app.setDefaultRemovalPolicy(RemovalPolicy.DESTROY);
     }
+
+    // Use Secrets Manager cache layer to make secrets lookups fast in Lambdas.
+    // REFER: https://docs.aws.amazon.com/secretsmanager/latest/userguide/retrieving-secrets_lambda.html
+    const secretsCacheLayer = LayerVersion.fromLayerVersionArn(stack, 'ProjectsSecretsLambdaLayer', lambdaSecretsLayerArn);
 
     const vpc = new Vpc(stack, 'ProjectsVPC', {
         vpcName: 'Projects-VPC',
@@ -149,6 +156,9 @@ export function FoldBackendStack({ app, stack }: StackContext) {
     const streamHandlerFunctionName = 'fold-backend-cdc-kinesis-stream-handler' as const
     const streamHandler = new Function(stack, 'ProjectsCDCStreamHandler', {
         functionName: streamHandlerFunctionName,
+        architecture: 'arm_64',
+        layers: [ secretsCacheLayer ],
+        runtime: 'nodejs18.x',
         description: 'Lambda function that is triggered for records on the Kinesis CDC stream from DMS',
         handler: 'packages/functions/src/pg-cdc-kinesis.main',
         url: false,
@@ -246,6 +256,7 @@ export function FoldBackendStack({ app, stack }: StackContext) {
     //     publiclyAccessible: false,
     //     autoMinorVersionUpgrade: false,
     //     allowMajorVersionUpgrade: false,
+    //     vpc: vpc,
     //     vpcSecurityGroupIds: [sg.securityGroupId],
     //     replicationSubnetGroupIdentifier: dmsReplicationSubnetGroup.replicationSubnetGroupIdentifier,
     // });
@@ -342,13 +353,15 @@ export function FoldBackendStack({ app, stack }: StackContext) {
     const api = new Api(stack, 'ProjectsApi', {
         defaults: {
             function: {
+                functionName: 'fold-backend-projects-api-handler',
                 description: 'Lambda function that handles all API calls to Projects data',
+                architecture: 'arm_64',
+                runtime: 'nodejs18.x',
                 vpc: undefined,
                 vpcSubnets: undefined,
                 environment: {
                     OPENSEARCH_DOMAIN_ENDPOINT: search.domainEndpoint,
-                    OPENSEARCH_MASTER_USERNAME: searchMasterUsername,
-                    OPENSEARCH_MASTER_PASSWORD: search.masterUserPassword?.toString()
+                    OPENSEARCH_MASTER_CREDENTIALS_SECRET_ID: openSearchMasterSecret.secretName,
                 },
                 permissions: [
                     new PolicyStatement({
@@ -372,12 +385,16 @@ export function FoldBackendStack({ app, stack }: StackContext) {
         },
     });
 
+    openSearchMasterSecret.grantRead(Role.fromRoleArn(stack, 'ProjectsApiHandlerExecRoleLookup', api.getFunction('GET /projects')?.role?.roleArn as string));
+
+    // Allow Kinesis CDC stream handler to read OpenSearch secrets
+    // so it can write CDC data to OpenSearch.
+    streamHandler.addEnvironment('OPENSEARCH_MASTER_CREDENTIALS_SECRET_ID', openSearchMasterSecret.secretName);
+    openSearchMasterSecret.grantRead(Role.fromRoleArn(stack, 'ProjectsStreamHandlerExecRoleLookup', streamHandler.role?.roleArn as string));
+
     // Show important values in output.
     stack.addOutputs({
         DatabaseEndpoint: db.dbInstanceEndpointAddress,
-        DatabaseSecretArn: dbMasterSecret.secretArn,
-        KinesisStreamArn: stream.streamArn,
-        KinesisStreamHandlerLambdaArn: streamHandler.functionArn,
         VpcId: vpc.vpcId,
         DatabaseVpcId: db.vpc.vpcId,
         ApiEndpoint: api.url,
