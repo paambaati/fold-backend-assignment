@@ -8,7 +8,7 @@ import { Credentials, DatabaseInstanceEngine, DatabaseInstance, PostgresEngineVe
 import { InstanceClass, InstanceSize, InstanceType, Vpc, Peer, Port, SecurityGroup, SubnetType, IpAddresses, EbsDeviceVolumeType } from 'aws-cdk-lib/aws-ec2';
 import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
 import { StartingPosition, LayerVersion } from 'aws-cdk-lib/aws-lambda';
-import { CfnReplicationSubnetGroup, CfnEndpoint } from 'aws-cdk-lib/aws-dms';
+import { CfnReplicationSubnetGroup, CfnEndpoint, CfnReplicationInstance, CfnReplicationTask } from 'aws-cdk-lib/aws-dms';
 // import { CdkResourceInitializer } from './resources/initializer';
 // import { DockerImageCode } from 'aws-cdk-lib/aws-lambda';
 
@@ -157,7 +157,7 @@ export function FoldBackendStack({ app, stack }: StackContext) {
     const streamHandler = new Function(stack, 'ProjectsCDCStreamHandler', {
         functionName: streamHandlerFunctionName,
         architecture: 'arm_64',
-        layers: [ secretsCacheLayer ],
+        layers: [secretsCacheLayer],
         runtime: 'nodejs18.x',
         description: 'Lambda function that is triggered for records on the Kinesis CDC stream from DMS',
         handler: 'packages/functions/src/pg-cdc-kinesis.main',
@@ -217,7 +217,8 @@ export function FoldBackendStack({ app, stack }: StackContext) {
     const dmsSourceEndpoint = new CfnEndpoint(stack, 'ProjectsDMSDBSourceEndpoint', {
         endpointType: 'source',
         engineName: 'postgres',
-        resourceIdentifier: 'projects-dms-ep-source-pgsql',
+        resourceIdentifier: 'projects-dms-source-ep-pgsql',
+        endpointIdentifier: 'projects-dms-source-ep-pgsql',
         databaseName: dbName,
         port: dbPort,
         serverName: db.dbInstanceEndpointAddress,
@@ -229,7 +230,8 @@ export function FoldBackendStack({ app, stack }: StackContext) {
     const dmsTargetEndpoint = new CfnEndpoint(stack, 'ProjectsDMSKinesisTargetEndpoint', {
         endpointType: 'target',
         engineName: 'kinesis',
-        resourceIdentifier: 'projects-dms-ep-target-kinesis',
+        resourceIdentifier: 'projects-dms-target-ep-kinesis',
+        endpointIdentifier: 'projects-dms-target-ep-kinesis',
         kinesisSettings: {
             streamArn: stream.streamArn,
             messageFormat: 'json',
@@ -241,66 +243,72 @@ export function FoldBackendStack({ app, stack }: StackContext) {
     // Why? SEE: https://github.com/hashicorp/terraform-provider-aws/issues/7602
     const dmsReplicationSubnetGroup = new CfnReplicationSubnetGroup(stack, 'ProjectsDMSReplicationSubnetGroup', {
         replicationSubnetGroupDescription: 'Subnet group for DMS replication',
-        // subnetIds: vpc.publicSubnets.map(s => s.subnetId),
-        // TODO: somehow `db.vpc` is still returning only the default VPC :-(
-        subnetIds: db.vpc.publicSubnets.map(s => s.subnetId),
+        subnetIds: db.vpc.selectSubnets({
+            subnetType: __UNSAFE_ALLOW_OUTSIDE_ACCESS ? SubnetType.PUBLIC : SubnetType.PRIVATE_ISOLATED
+        }).subnetIds,
     });
     dmsReplicationSubnetGroup.node.addDependency(dmsVpcIamRole);
 
-    // const dmsReplicationInstance = new CfnReplicationInstance(stack, 'ProjectsDMSReplicationInstance', {
-    //     replicationInstanceClass: 'dms.t3.micro',
-    //     replicationInstanceIdentifier: 'projects-fold-dms-replicator',
-    //     engineVersion: '3.4.6',
-    //     multiAz: false,
-    //     allocatedStorage: 10,
-    //     publiclyAccessible: false,
-    //     autoMinorVersionUpgrade: false,
-    //     allowMajorVersionUpgrade: false,
-    //     vpc: vpc,
-    //     vpcSecurityGroupIds: [sg.securityGroupId],
-    //     replicationSubnetGroupIdentifier: dmsReplicationSubnetGroup.replicationSubnetGroupIdentifier,
-    // });
-    // dmsReplicationInstance.node.addDependency(dmsReplicationSubnetGroup);
+    const dmsReplicationInstance = new CfnReplicationInstance(stack, 'ProjectsDMSReplicationInstance', {
+        replicationInstanceClass: 'dms.t3.micro',
+        replicationInstanceIdentifier: 'projects-fold-dms-replicator',
+        engineVersion: '3.4.6', // Use 3.4.6 for now, as 3.4.7 needs more complex networking rules to work properly. 
+        multiAz: false,
+        allocatedStorage: 10,
+        publiclyAccessible: false,
+        autoMinorVersionUpgrade: false,
+        allowMajorVersionUpgrade: false,
+        vpcSecurityGroupIds: [sg.securityGroupId],
+        replicationSubnetGroupIdentifier: dmsReplicationSubnetGroup.ref,
+    });
+    dmsReplicationInstance.node.addDependency(dmsReplicationSubnetGroup);
 
-    // const dmsReplicationTask = new CfnReplicationTask(stack, 'ProjectsDMSReplicationTask', {
-    //     migrationType: 'full-load-and-cdc',
-    //     replicationTaskIdentifier: 'projects-fold-dms-cdc-postgresql-to-kinesis',
-    //     replicationInstanceArn: dmsReplicationInstance.ref,
-    //     sourceEndpointArn: dmsSourceEndpoint.ref,
-    //     targetEndpointArn: dmsTargetEndpoint.ref,
-    //     replicationTaskSettings: JSON.stringify({
-    //         Logging: {
-    //             EnableLogging: true,
-    //             EnableLogContext: false,
-    //         },
-    //         ControlTablesSettings: {
-    //             // Track all CDC status right inside the source table,
-    //             // but within a custom schema. Makes it easier to track CDC progress via SQL.
-    //             ControlSchema: 'aws_dms',
-    //             StatusTableEnabled: true,
-    //             SuspendedTablesTableEnabled: true,
-    //             HistoryTableEnabled: true,
-    //             FullLoadExceptionTableEnabled: true,
-    //           },
-    //     }),
-    //     tableMappings: JSON.stringify({
-    //         rules: [
-    //             {
-    //                 'rule-type': 'selection',
-    //                 'rule-id': '1',
-    //                 'rule-name': 'passthrough-everything',
-    //                  // Capture all public tables
-    //                 'object-locator': {
-    //                     'schema-name': 'public', 
-    //                     'table-name': '%'
-    //                 },
-    //                 'rule-action': 'include',
-    //             }
-    //         ],
-    //     }),
-    // });
+    const dmsReplicationTask = new CfnReplicationTask(stack, 'ProjectsDMSReplicationTask', {
+        migrationType: 'full-load-and-cdc',
+        replicationTaskIdentifier: 'projects-fold-dms-cdc-postgresql-to-kinesis',
+        replicationInstanceArn: dmsReplicationInstance.ref,
+        sourceEndpointArn: dmsSourceEndpoint.ref,
+        targetEndpointArn: dmsTargetEndpoint.ref,
+        replicationTaskSettings: JSON.stringify({
+            Logging: {
+                EnableLogging: true,
+                EnableLogContext: false,
+            },
+            ControlTablesSettings: {
+                // Track all CDC status right inside the source database,
+                // but within a custom schema; makes it easier to track CDC progress via SQL.
+                ControlSchema: 'aws_dms',
+                StatusTableEnabled: true,
+                SuspendedTablesTableEnabled: true,
+                HistoryTableEnabled: true,
+                FullLoadExceptionTableEnabled: true,
+            },
+            BeforeImageSettings: {
+                EnableBeforeImage: true, // Set to `true` to get the before image in CDC data.
+                FieldName: 'before-image',
+                ColumnFilter: 'all',
+            },
+        }),
+        tableMappings: JSON.stringify({
+            rules: [
+                {
+                    'rule-type': 'selection',
+                    'rule-id': '1',
+                    'rule-name': 'passthrough-everything',
+                    // Capture all tables but only in the `public` schema.
+                    'object-locator': {
+                        'schema-name': 'public',
+                        'table-name': '%'
+                    },
+                    'rule-action': 'include',
+                }
+            ],
+        }),
+    });
 
     // Set up OpenSearch.
+    // Uses master username-password basic authentication.
+    // TODO: Tighter auth policy.
     const searchMasterUsername = 'admin' as const
     const openSearchMasterSecret = new Secret(stack, 'ProjectsOSMasterSecret', {
         secretName: 'projects-opensearch-master-secret',
@@ -399,7 +407,7 @@ export function FoldBackendStack({ app, stack }: StackContext) {
         DatabaseVpcId: db.vpc.vpcId,
         ApiEndpoint: api.url,
         OpenSearchDomainEndpoint: search.domainEndpoint,
-        // DmsReplicationTaskArn: dmsReplicationTask.ref,
+        DmsReplicationTaskArn: dmsReplicationTask.ref,
         // DatabaseInitResponse: Token.asString(initializer.response),
     });
 
