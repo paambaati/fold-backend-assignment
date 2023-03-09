@@ -1,4 +1,5 @@
 import got from 'got';
+import { getCredentials } from './utils/get-secret';
 import type { SearchResponse } from 'elasticsearch';
 import type { APIGatewayProxyHandlerV2 } from 'aws-lambda';
 
@@ -17,14 +18,14 @@ const request = got.extend({
 
 export const main: APIGatewayProxyHandlerV2 = async (_event) => {
     const osEndpoint = process.env.OPENSEARCH_DOMAIN_ENDPOINT;
-    const osUsername = process.env.OPENSEARCH_MASTER_USERNAME;
-    const osPassword = process.env.OPENSEARCH_MASTER_PASSWORD;
+    const osCredentialsSecretId = process.env.OPENSEARCH_MASTER_CREDENTIALS_SECRET_ID as string;
+    const { username, password } = await getCredentials(osCredentialsSecretId);
     const osIndex = 'projects' as const
 
-    const url = `https://${osEndpoint}/${osIndex}/_search?pretty=true&q=*:*`
+    const url = `https://${osEndpoint}/${osIndex}/_search?pretty=true&q=*:*`;
     const searchResponse = await request.get(url, {
-        username: osUsername,
-        password: osPassword,
+        username,
+        password,
     }).json<SearchResponse<Project>>();
 
     const response = searchResponse.hits.hits.map(hit => hit._source);

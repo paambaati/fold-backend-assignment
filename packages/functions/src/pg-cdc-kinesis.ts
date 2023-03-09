@@ -1,5 +1,6 @@
 import got, { type Method } from 'got';
-import type { KinesisStreamEvent } from 'aws-lambda';
+import { getCredentials } from './utils/get-secret';
+import type { KinesisStreamHandler } from 'aws-lambda';
 
 export interface DMSCDCData {
     /** Actual database record. */
@@ -37,7 +38,7 @@ const FOLD_TABLES = [
     'user_projects'
 ];
 
-export const main = async (event: KinesisStreamEvent) => {
+export const main: KinesisStreamHandler = async (event) => {
     console.debug(`Received Kinesis event from DMS with ${event.Records.length} record(s)`);
     console.debug(JSON.stringify(event.Records));
     const cdcRecords: Array<DMSCDCData> = []
@@ -51,8 +52,8 @@ export const main = async (event: KinesisStreamEvent) => {
     }
     
     const osEndpoint = process.env.OPENSEARCH_DOMAIN_ENDPOINT;
-    const osUsername = process.env.OPENSEARCH_MASTER_USERNAME;
-    const osPassword = process.env.OPENSEARCH_MASTER_PASSWORD;
+    const osCredentialsSecretId = process.env.OPENSEARCH_MASTER_CREDENTIALS_SECRET_ID as string;
+    const { username, password } = await getCredentials(osCredentialsSecretId);
     const osOps = cdcRecords.flatMap(record => {
         const osIndex = record.metadata['table-name'];
         const recordId = record.data.id as number;
@@ -63,8 +64,8 @@ export const main = async (event: KinesisStreamEvent) => {
             const url = `https://${osEndpoint}/${osIndex}/_doc/${recordId}`
             const op = request(url, {
                 method,
-                username: osUsername,
-                password: osPassword,
+                username,
+                password,
                 throwHttpErrors: operationType === 'delete' ? false : undefined,
                 json: operationType === 'delete' ? undefined : record.data,
             });
@@ -83,7 +84,7 @@ export const main = async (event: KinesisStreamEvent) => {
     if (osOps.length) {
         console.info(`Going to execute ${osOps.length} operation(s) on OpenSearch...`);
         const osResults = await Promise.all(osOps.map(_ => _.operation));
-        console.info(`Finished executing ${osOps.length} operation(s) on OpenSearch!`);
+        console.info(`Finished executing ${osResults.length} operation(s) on OpenSearch!`);
         for (const [index, osResult] of osResults.entries()) {
             const opMeta = osOps[index];
             console.info(`OpenSearch response for ${opMeta.operationType} (HTTP ${opMeta.method}) operation on ${opMeta.index}/${opMeta.recordId}`, osResult.statusCode, osResult.body);
