@@ -11,7 +11,7 @@
     "remove": "sst remove",
     "console": "sst console",
     "typecheck": "tsc --noEmit",
-    "format": "dprint"
+    "format": "dprint fmt"
   },
   "repository": {
     "type": "git",
