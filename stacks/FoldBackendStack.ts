@@ -1,26 +1,41 @@
-import { Api, Function, KinesisStream, StackContext } from 'sst/constructs';
+import { Api, Function, KinesisStream, type StackContext } from 'sst/constructs';
 import { Duration, RemovalPolicy, Tags } from 'aws-cdk-lib';
 import { KinesisEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 import { Stream } from 'aws-cdk-lib/aws-kinesis';
+import { TriggerFunction } from 'aws-cdk-lib/triggers'
 import { Domain, EngineVersion } from 'aws-cdk-lib/aws-opensearchservice';
-import { Role, ServicePrincipal, Policy, PolicyStatement, Effect, ArnPrincipal, AnyPrincipal, ManagedPolicy } from 'aws-cdk-lib/aws-iam';
-import { Credentials, DatabaseInstanceEngine, DatabaseInstance, PostgresEngineVersion, ParameterGroup } from 'aws-cdk-lib/aws-rds';
-import { InstanceClass, InstanceSize, InstanceType, Vpc, Peer, Port, SecurityGroup, SubnetType, IpAddresses, EbsDeviceVolumeType } from 'aws-cdk-lib/aws-ec2';
+import { Role, ServicePrincipal, Policy, PolicyStatement, Effect, ArnPrincipal, AnyPrincipal, ManagedPolicy, AccountPrincipal } from 'aws-cdk-lib/aws-iam';
+import { Credentials, DatabaseInstanceEngine, DatabaseInstance, PostgresEngineVersion, ParameterGroup, DatabaseProxy, ProxyTarget } from 'aws-cdk-lib/aws-rds';
+import { InstanceClass, InstanceSize, InstanceType, Vpc, Peer, Port, SecurityGroup, SubnetType, IpAddresses, EbsDeviceVolumeType, CfnSecurityGroupIngress, CfnSecurityGroupEgress, InterfaceVpcEndpoint } from 'aws-cdk-lib/aws-ec2';
 import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
-import { StartingPosition, LayerVersion } from 'aws-cdk-lib/aws-lambda';
+import { StartingPosition, LayerVersion, Runtime, Architecture, Code, Handler } from 'aws-cdk-lib/aws-lambda';
 import { CfnReplicationSubnetGroup, CfnEndpoint, CfnReplicationInstance, CfnReplicationTask } from 'aws-cdk-lib/aws-dms';
-// import { CdkResourceInitializer } from './resources/initializer';
-// import { DockerImageCode } from 'aws-cdk-lib/aws-lambda';
-
-// TODO: set this to false when deployment is fired on production.
-const __UNSAFE_ALLOW_OUTSIDE_ACCESS = true as const
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import { RetentionDays } from 'aws-cdk-lib/aws-logs';
+import { getPublicIp } from './utils/ip';
+import { getUsername } from './utils/username';
 
 // REFER: https://docs.aws.amazon.com/secretsmanager/latest/userguide/retrieving-secrets_lambda.html#retrieving-secrets_lambda_ARNs
 const lambdaSecretsLayerArn = 'arn:aws:lambda:us-east-1:177933569100:layer:AWS-Parameters-and-Secrets-Lambda-Extension-Arm64:4' as const;
 
 export function FoldBackendStack({ app, stack }: StackContext) {
+    /** Flag that denotes if the stack is running locally in development mode. */
+    const IS_LOCAL = app.mode === 'dev';
+    /** Public IP address of the currently running machine. */
+    let publicIp: string | undefined;
+
+    app.setDefaultFunctionProps({
+        logRetention: 'three_days',
+    });
+
     if (app.stage !== 'prod') {
-        app.setDefaultRemovalPolicy(RemovalPolicy.DESTROY);
+        // TODO: remove this and use DESTORY for all non-prod stuff.
+        app.setDefaultRemovalPolicy(RemovalPolicy.RETAIN);
+        // app.setDefaultRemovalPolicy(RemovalPolicy.DESTROY);
+    }
+
+    if (IS_LOCAL) {
+        publicIp = getPublicIp();
     }
 
     // Use Secrets Manager cache layer to make secrets lookups fast in Lambdas.
@@ -28,23 +43,25 @@ export function FoldBackendStack({ app, stack }: StackContext) {
     const secretsCacheLayer = LayerVersion.fromLayerVersionArn(stack, 'ProjectsSecretsLambdaLayer', lambdaSecretsLayerArn);
 
     const vpc = new Vpc(stack, 'ProjectsVPC', {
-        vpcName: 'Projects-VPC',
+        vpcName: 'fold-backend-projects-vpc',
         ipAddresses: IpAddresses.cidr('10.0.0.0/16'),
         natGateways: 0,
+        enableDnsHostnames: true, // NOTE: Required only if you're using VPC endpoints.
+        enableDnsSupport: true, // NOTE: Required only if you're using VPC endpoints.
         maxAzs: 3, // NOTE: Has to be >= 2 for RDS to spin up inside this VPC.
         subnetConfiguration: [
             {
-                name: 'private-subnet-1',
+                name: 'fold-backend-projects-subnet-private',
                 subnetType: SubnetType.PRIVATE_WITH_EGRESS,
                 cidrMask: 24,
             },
             {
-                name: 'public-subnet-1',
+                name: 'fold-backend-projects-subnet-public',
                 subnetType: SubnetType.PUBLIC,
                 cidrMask: 24,
             },
             {
-                name: 'isolated-subnet-1',
+                name: 'fold-backend-projects-subnet-isolated',
                 subnetType: SubnetType.PRIVATE_ISOLATED,
                 cidrMask: 24,
             },
@@ -52,19 +69,12 @@ export function FoldBackendStack({ app, stack }: StackContext) {
     });
 
     const sg = new SecurityGroup(stack, 'ProjectsSecurityGroup', {
-        securityGroupName: 'Projects-SG',
-        description: 'Security group for Fold projects',
-        vpc: vpc,
+        securityGroupName: 'fold-backend-projects-sg',
+        description: 'Security group for Fold backend projects',
+        vpc,
         allowAllOutbound: true,
     });
-
-    // Push everything from SST to use our hand-crafted VPC.
-    stack.setDefaultFunctionProps({
-        vpc: vpc,
-        vpcSubnets: {
-            subnets: vpc.privateSubnets,
-        },
-    });
+    Tags.of(sg).add('Name', 'fold-backend-projects-sg');
 
     // Create custom RDS parameter group for PG DB to enable logical replication so DMS can pick up CDC.
     const dbVersion = 13 as const // NOTE: Not using 14.x because it requires DMS engine 3.4.7, which isn't working with private subnets.
@@ -83,21 +93,21 @@ export function FoldBackendStack({ app, stack }: StackContext) {
         description: 'Default parameters but modified for logical replication (for CDC to work)',
     });
 
-    // Create PostgreSQL DB
+    // Create PostgreSQL DB.
     const dbEngine = DatabaseInstanceEngine.postgres({ version: PostgresEngineVersion[`VER_${dbVersion}`] });
     const dbInstanceType = InstanceType.of(InstanceClass.T3, InstanceSize.MICRO);
     const dbPort = 5432 as const;
     const dbName = 'folddb' as const;
 
     const dbMasterSecret = new Secret(stack, 'ProjectsDBMasterSecret', {
-        secretName: 'projects-db-master-secret',
+        secretName: 'fold-backend-projects-db-master-secret',
         description: 'PostgreSQL database master user credentials',
         generateSecretString: {
             secretStringTemplate: JSON.stringify({ username: 'postgres' }),
             generateStringKey: 'password',
-            passwordLength: 16,
+            passwordLength: 32,
             excludePunctuation: true,
-        }
+        },
     });
 
     sg.addIngressRule(
@@ -106,71 +116,107 @@ export function FoldBackendStack({ app, stack }: StackContext) {
         `Allow port ${dbPort} for database connections from only within this VPC`,
     );
 
-    __UNSAFE_ALLOW_OUTSIDE_ACCESS ? sg.addIngressRule(
-        Peer.anyIpv4(),
-        Port.tcp(dbPort),
-        `Allow OUTSIDE ACCESS (temporarily) from ANYWHERE`
-    ) : () => { };
+    // Configure rules so the Trigger lambda can access RDS.
+    // REFER: https://aws.amazon.com/premiumsupport/knowledge-center/connect-lambda-to-an-rds-instance/
+    new CfnSecurityGroupIngress(stack, 'ProjectsVPCSGInitIngressRule', {
+        groupId: sg.securityGroupId,
+        sourceSecurityGroupId: sg.securityGroupId,
+        ipProtocol: 'tcp',
+        fromPort: dbPort,
+        toPort: dbPort,
+    });
+    new CfnSecurityGroupEgress(stack, 'ProjectsVPCSGInitEgressRule', {
+        groupId: sg.securityGroupId,
+        destinationSecurityGroupId: sg.securityGroupId,
+        ipProtocol: 'tcp',
+        fromPort: dbPort,
+        toPort: dbPort,
+    });
+
+    if (IS_LOCAL) {
+        console.warn(`WARN: Adding network ingress rule to allow DB to be accessed from your public IP address (${publicIp})`);
+        sg.addIngressRule(
+            Peer.ipv4(`${publicIp}/32`),
+            Port.tcp(dbPort),
+            `Allow OUTSIDE ACCESS (temporarily) for ${getUsername()}`,
+        );
+    }
+
+    // Set up VPC endpoint for secrets manager so the trigger Lamdbda
+    // can access Secrets Manager. Why? By default, Lambdas are placed
+    // in their own private VPC which does not have access to the outside.
+    const vpcSMEndpoint = new InterfaceVpcEndpoint(stack, 'ProjectsVPCSMEndpoint', {
+        vpc,
+        service: {
+            name: `com.amazonaws.${app.region}.secretsmanager`,
+            port: 443,
+            privateDnsDefault: true,
+        },
+        open: true,
+    });
+    Tags.of(vpcSMEndpoint).add('Name', 'fold-backend-projects-vpc-secretsmanager-ep');
+
+    vpcSMEndpoint.addToPolicy(new PolicyStatement({
+        sid: 'AllowReadAccessToSecretsManager',
+        principals: [
+            new AccountPrincipal(app.account),
+        ],
+        actions: [
+            'secretsmanager:GetSecretValue',
+        ],
+        effect: Effect.ALLOW,
+        resources: [
+            dbMasterSecret.secretArn,
+        ],
+    }));
 
     const db = new DatabaseInstance(stack, 'ProjectsDatabase', {
-        vpc: vpc,
+        instanceIdentifier: 'fold-backend-pg-db',
+        vpc,
         vpcSubnets: {
-            subnetType: __UNSAFE_ALLOW_OUTSIDE_ACCESS ? SubnetType.PUBLIC : SubnetType.PRIVATE_ISOLATED,
+            subnetType: SubnetType.PRIVATE_ISOLATED,
         },
         securityGroups: [sg],
-        publiclyAccessible: __UNSAFE_ALLOW_OUTSIDE_ACCESS,
         instanceType: dbInstanceType,
         engine: dbEngine,
         port: dbPort,
         databaseName: dbName,
         credentials: Credentials.fromSecret(dbMasterSecret),
-        backupRetention: Duration.days(0), // Disable snapshot backups to save cost.
-        deleteAutomatedBackups: true,
-        removalPolicy: RemovalPolicy.DESTROY,
+        backupRetention: Duration.days(IS_LOCAL ? 0 : 14), // Disable snapshot backups during local development alone to save costs.
+        deleteAutomatedBackups: IS_LOCAL ? true : false,
         parameterGroup: dbParameterGroup,
-        storageEncrypted: false,
+        storageEncrypted: true,
     });
 
-    __UNSAFE_ALLOW_OUTSIDE_ACCESS ? db.connections.allowFrom(Peer.anyIpv4(), Port.tcp(dbPort)) : () => { };
-
-    // const initializer = new CdkResourceInitializer(stack, 'ProjectsDBInit', {
-    //     config: {
-    //         credsSecretName: dbMasterSecret.secretName,
-    //     },
-    //     fnLogRetention: RetentionDays.THREE_DAYS,
-    //     fnCode: DockerImageCode.fromImageAsset(`${__dirname}/rds-init-fn-code`, {}),
-    //     fnTimeout: Duration.minutes(2),
-    //     fnSecurityGroups: [],
-    //     vpc,
-    //     subnetsSelection: vpc.selectSubnets({
-    //         subnetType: SubnetType.PRIVATE_WITH_EGRESS,
-    //     }),
-    // });
-    // initializer.customResource.node.addDependency(db);
-    // db.connections.allowFrom(initializer.function, Port.tcp(dbPort))
-    // dbMasterSecret.grantRead(initializer.function)
+    if (IS_LOCAL) {
+        console.warn(`WARN: Adding database connection rule to allow DB to be accessed from your public IP address (${publicIp})`);
+        db.connections.allowFrom(
+            Peer.ipv4(`${publicIp}/32`),
+            Port.tcp(dbPort),
+            `Allow OUTSIDE ACCESS (temporarily) for ${getUsername()}`,
+        );
+    }
 
     // Create the DB CDC capture stream.
     const stream = new KinesisStream(stack, 'ProjectsCDCStream');
+    const streamConstruct = Stream.fromStreamArn(stack, 'ProjectsCDCKinesisLookup', stream.streamArn)
 
     const streamHandlerFunctionName = 'fold-backend-cdc-kinesis-stream-handler' as const
     const streamHandler = new Function(stack, 'ProjectsCDCStreamHandler', {
         functionName: streamHandlerFunctionName,
-        architecture: 'arm_64',
+        architecture: Architecture.ARM_64,
         layers: [secretsCacheLayer],
-        runtime: 'nodejs18.x',
+        runtime: Runtime.NODEJS_18_X.toString(),
         description: 'Lambda function that is triggered for records on the Kinesis CDC stream from DMS',
         handler: 'packages/functions/src/pg-cdc-kinesis.main',
         url: false,
         logRetention: 'three_days',
-        vpc: undefined,
-        vpcSubnets: undefined,
     });
     streamHandler.addPermission('ProjectsCDCKinesisLambdaInvokePermission', {
         principal: new ArnPrincipal(streamHandler.role?.roleArn as string),
     });
 
-    streamHandler.addEventSource(new KinesisEventSource(Stream.fromStreamArn(stack, 'ProjectsCDCKinesisLookup', stream.streamArn), {
+    streamHandler.addEventSource(new KinesisEventSource(streamConstruct, {
         startingPosition: StartingPosition.TRIM_HORIZON,
     }));
 
@@ -217,8 +263,7 @@ export function FoldBackendStack({ app, stack }: StackContext) {
     const dmsSourceEndpoint = new CfnEndpoint(stack, 'ProjectsDMSDBSourceEndpoint', {
         endpointType: 'source',
         engineName: 'postgres',
-        resourceIdentifier: 'projects-dms-source-ep-pgsql',
-        endpointIdentifier: 'projects-dms-source-ep-pgsql',
+        endpointIdentifier: 'fold-backend-projects-dms-source-ep-pgsql',
         databaseName: dbName,
         port: dbPort,
         serverName: db.dbInstanceEndpointAddress,
@@ -230,8 +275,7 @@ export function FoldBackendStack({ app, stack }: StackContext) {
     const dmsTargetEndpoint = new CfnEndpoint(stack, 'ProjectsDMSKinesisTargetEndpoint', {
         endpointType: 'target',
         engineName: 'kinesis',
-        resourceIdentifier: 'projects-dms-target-ep-kinesis',
-        endpointIdentifier: 'projects-dms-target-ep-kinesis',
+        endpointIdentifier: 'fold-backend-projects-dms-target-ep-kinesis',
         kinesisSettings: {
             streamArn: stream.streamArn,
             messageFormat: 'json',
@@ -244,14 +288,14 @@ export function FoldBackendStack({ app, stack }: StackContext) {
     const dmsReplicationSubnetGroup = new CfnReplicationSubnetGroup(stack, 'ProjectsDMSReplicationSubnetGroup', {
         replicationSubnetGroupDescription: 'Subnet group for DMS replication',
         subnetIds: db.vpc.selectSubnets({
-            subnetType: __UNSAFE_ALLOW_OUTSIDE_ACCESS ? SubnetType.PUBLIC : SubnetType.PRIVATE_ISOLATED
+            subnetType: IS_LOCAL ? SubnetType.PUBLIC : SubnetType.PRIVATE_ISOLATED
         }).subnetIds,
     });
     dmsReplicationSubnetGroup.node.addDependency(dmsVpcIamRole);
 
     const dmsReplicationInstance = new CfnReplicationInstance(stack, 'ProjectsDMSReplicationInstance', {
         replicationInstanceClass: 'dms.t3.micro',
-        replicationInstanceIdentifier: 'projects-fold-dms-replicator',
+        replicationInstanceIdentifier: 'fold-backend-dms-replicator',
         engineVersion: '3.4.6', // Use 3.4.6 for now, as 3.4.7 needs more complex networking rules to work properly. 
         multiAz: false,
         allocatedStorage: 10,
@@ -265,7 +309,7 @@ export function FoldBackendStack({ app, stack }: StackContext) {
 
     const dmsReplicationTask = new CfnReplicationTask(stack, 'ProjectsDMSReplicationTask', {
         migrationType: 'full-load-and-cdc',
-        replicationTaskIdentifier: 'projects-fold-dms-cdc-postgresql-to-kinesis',
+        replicationTaskIdentifier: 'fold-backend-dms-cdc-postgresql-to-kinesis',
         replicationInstanceArn: dmsReplicationInstance.ref,
         sourceEndpointArn: dmsSourceEndpoint.ref,
         targetEndpointArn: dmsTargetEndpoint.ref,
@@ -284,7 +328,9 @@ export function FoldBackendStack({ app, stack }: StackContext) {
                 FullLoadExceptionTableEnabled: true,
             },
             BeforeImageSettings: {
-                EnableBeforeImage: true, // Set to `true` to get the before image in CDC data.
+                // Set to `true` to get the before image in CDC data.
+                // REFER: https://docs.aws.amazon.com/dms/latest/userguide/CHAP_Tasks.CustomizingTasks.TaskSettings.BeforeImage.html
+                EnableBeforeImage: true,
                 FieldName: 'before-image',
                 ColumnFilter: 'all',
             },
@@ -311,12 +357,12 @@ export function FoldBackendStack({ app, stack }: StackContext) {
     // TODO: Tighter auth policy.
     const searchMasterUsername = 'admin' as const
     const openSearchMasterSecret = new Secret(stack, 'ProjectsOSMasterSecret', {
-        secretName: 'projects-opensearch-master-secret',
+        secretName: 'fold-backend-projects-opensearch-master-secret',
         description: 'OpenSearch domain master user credentials',
         generateSecretString: {
             secretStringTemplate: JSON.stringify({ username: searchMasterUsername }),
             generateStringKey: 'password',
-            passwordLength: 16,
+            passwordLength: 32,
             requireEachIncludedType: true,
         },
     });
@@ -324,6 +370,16 @@ export function FoldBackendStack({ app, stack }: StackContext) {
     const search = new Domain(stack, 'ProjectsSearch', {
         domainName: 'fold-backend-search-domain',
         version: EngineVersion.OPENSEARCH_2_3,
+        // NOTE: these values are only for experiments, and not tuned for production.
+        capacity: {
+            dataNodeInstanceType: 't3.small.search',
+            dataNodes: 1,
+        },
+        ebs: {
+            enabled: true,
+            volumeType: EbsDeviceVolumeType.GP2,
+            volumeSize: 10,
+        },
         encryptionAtRest: {
             enabled: true
         },
@@ -335,9 +391,7 @@ export function FoldBackendStack({ app, stack }: StackContext) {
         enableVersionUpgrade: false,
         nodeToNodeEncryption: true,
         enforceHttps: true,
-        capacity: {
-            dataNodeInstanceType: 'm6g.large.search',
-        },
+        vpc: undefined,
         accessPolicies: [
             new PolicyStatement({
                 sid: 'AllowEverything',
@@ -350,12 +404,6 @@ export function FoldBackendStack({ app, stack }: StackContext) {
                 effect: Effect.ALLOW,
             }),
         ],
-        ebs: {
-            enabled: true,
-            volumeType: EbsDeviceVolumeType.GP3,
-            volumeSize: 10,
-        },
-        removalPolicy: RemovalPolicy.DESTROY,
     });
 
     const api = new Api(stack, 'ProjectsApi', {
@@ -363,10 +411,11 @@ export function FoldBackendStack({ app, stack }: StackContext) {
             function: {
                 functionName: 'fold-backend-projects-api-handler',
                 description: 'Lambda function that handles all API calls to Projects data',
-                architecture: 'arm_64',
-                runtime: 'nodejs18.x',
-                vpc: undefined,
-                vpcSubnets: undefined,
+                architecture: Architecture.ARM_64,
+                runtime: Runtime.NODEJS_18_X.toString(),
+                layers: [
+                    secretsCacheLayer,
+                ],
                 environment: {
                     OPENSEARCH_DOMAIN_ENDPOINT: search.domainEndpoint,
                     OPENSEARCH_MASTER_CREDENTIALS_SECRET_ID: openSearchMasterSecret.secretName,
@@ -392,13 +441,65 @@ export function FoldBackendStack({ app, stack }: StackContext) {
             retention: 'three_days',
         },
     });
+    /** `Function` construct for the `GET /projects` Lambda handler function. */
+    const apiFunction = api.getFunction('GET /projects') as Function;
 
-    openSearchMasterSecret.grantRead(Role.fromRoleArn(stack, 'ProjectsApiHandlerExecRoleLookup', api.getFunction('GET /projects')?.role?.roleArn as string));
+    openSearchMasterSecret.grantRead(Role.fromRoleArn(stack, 'ProjectsApiHandlerExecRoleLookup', apiFunction.role?.roleArn as string));
 
     // Allow Kinesis CDC stream handler to read OpenSearch secrets
     // so it can write CDC data to OpenSearch.
     streamHandler.addEnvironment('OPENSEARCH_MASTER_CREDENTIALS_SECRET_ID', openSearchMasterSecret.secretName);
     openSearchMasterSecret.grantRead(Role.fromRoleArn(stack, 'ProjectsStreamHandlerExecRoleLookup', streamHandler.role?.roleArn as string));
+
+    // Set up DB initializer.
+    // This handles initial DB bootstrapping (like installing PostgreSQL extensions for CDC).
+    const dbInit = new TriggerFunction(stack, 'ProjectsDbInitHandler', {
+        functionName: 'fold-backend-db-init-lambda-trigger',
+        description: 'Lambda function that is triggered when the database is initialized',
+        timeout: Duration.seconds(15),
+        runtime: Runtime.FROM_IMAGE,
+        architecture: Architecture.X86_64,
+        code: Code.fromAssetImage('stacks/triggers/db-init', {
+            platform: Platform.LINUX_AMD64,
+        }),
+        handler: Handler.FROM_IMAGE,
+        vpc: db.vpc,
+        vpcSubnets: {
+            subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+        },
+        logRetention: RetentionDays.THREE_DAYS,
+        environment: {
+            DB_HOST: db.dbInstanceEndpointAddress,
+            DB_PORT: db.dbInstanceEndpointPort,
+            DB_NAME: dbName,
+            DB_SECRET_ID: dbMasterSecret.secretName,
+        },
+        executeAfter: [
+            db,
+            dbParameterGroup,
+            vpcSMEndpoint,
+        ],
+        executeBefore: [
+            // Make sure DB initialization is completed _before_ DMS can start CDC replication.
+            dmsReplicationInstance,
+            dmsReplicationTask,
+            // Add other non-dependencies that take too long to provision/re-provision.
+            // This helps save time waiting for CloudFormation to rollback when something goes wrong in this trigger.
+            // dbProxy,
+            search,
+            Function.fromFunctionArn(stack, 'ProjectsGetAPIFunctionLookup', apiFunction.functionArn as string),
+            streamHandler,
+            streamConstruct,
+            dmsSourceEndpoint,
+            dmsTargetEndpoint,
+            dmsReplicationSubnetGroup,
+        ],
+    });
+    dbInit.addPermission('ProjectsDbInitHandlerInvokePermission', {
+        principal: new ArnPrincipal(dbInit.role?.roleArn as string),
+    });
+    dbMasterSecret.grantRead(Role.fromRoleArn(stack, 'ProjectsDbInitHandlerExecRoleLookup', dbInit.role?.roleArn as string));
+    vpcSMEndpoint.connections.allowFrom(dbInit, Port.allTcp());
 
     // Show important values in output.
     stack.addOutputs({
@@ -408,7 +509,6 @@ export function FoldBackendStack({ app, stack }: StackContext) {
         ApiEndpoint: api.url,
         OpenSearchDomainEndpoint: search.domainEndpoint,
         DmsReplicationTaskArn: dmsReplicationTask.ref,
-        // DatabaseInitResponse: Token.asString(initializer.response),
     });
 
     // Add tags for easier tracking of resources.
