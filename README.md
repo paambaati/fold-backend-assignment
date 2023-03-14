@@ -24,9 +24,9 @@ These ES records are then made query-able using a HTTP API that uses the ES API 
 
 1. Do we even need CDC?
 
-    CDC is a complex problem to solve, and introduces too many complexities – including additional moving parts, additional running costs and o11y challenges.
+   CDC is a complex problem to solve, and introduces too many complexities – including additional moving parts, additional running costs and o11y challenges.
 
-    **I would urge we try to eliminate CDC**, and if we control the database writer, rather write to ElasticSearch from the same writer. Frequent single-record writes to ElasticSearch might be slow, so if overall application response latency is an issue, the writes might be committed on separate green threads or a queueing/logging system like Kafka or SQS. This also comes with the additional bonus of more flexibility and power in what _exactly_ we write to ElasticSearch.
+   **I would urge we try to eliminate CDC**, and if we control the database writer, rather write to ElasticSearch from the same writer. Frequent single-record writes to ElasticSearch might be slow, so if overall application response latency is an issue, the writes might be committed on separate green threads or a queueing/logging system like Kafka or SQS. This also comes with the additional bonus of more flexibility and power in what _exactly_ we write to ElasticSearch.
 
 ### Low-level implementation
 
@@ -38,9 +38,9 @@ Once this is working, we build a Lambda API that queries OpenSearch according to
 
 1. Perhaps a local-first spike of a full setup end-to-end?
 
-    This will include a local copy of PostgreSQL, pgSync and ElasticSearch – this will show if the sync can work.
+   This will include a local copy of PostgreSQL, pgSync and ElasticSearch – this will show if the sync can work.
 
-    ❌ – might be complex to productionize this, as we'd generally want discrete systems running inside their own infra boundaries. Might be better to develop directly against AWS.
+   ❌ – might be complex to productionize this, as we'd generally want discrete systems running inside their own infra boundaries. Might be better to develop directly against AWS.
 
 #### Tasks
 
@@ -67,51 +67,51 @@ Once this is working, we build a Lambda API that queries OpenSearch according to
 
 1. Node.js
 
-    This project assumes you have Node.js (>= 16.x) installed. If you do not, please download and install it from https://nodejs.org
+   This project assumes you have Node.js (>= 16.x) installed. If you do not, please download and install it from https://nodejs.org
 
 2. AWS account and credentials
 
-    You should have AWS credentials set up to run and deploy the project. If you do not, please follow the instructions on https://docs.aws.amazon.com/general/latest/gr/aws-sec-cred-types.html#access-keys-and-secret-access-keys
+   You should have AWS credentials set up to run and deploy the project. If you do not, please follow the instructions on https://docs.aws.amazon.com/general/latest/gr/aws-sec-cred-types.html#access-keys-and-secret-access-keys
 
 3. Git
 
-    To clone this project, you will need `git`. If you do not, please follow the instructions on https://github.com/git-guides/install-git
+   To clone this project, you will need `git`. If you do not, please follow the instructions on https://github.com/git-guides/install-git
 
 ### Steps
 
 1. Clone this project –
 
-    ```bash
-    git clone https://github.com/paambaati/fold-backend-assignment
-    ```
+   ```bash
+   git clone https://github.com/paambaati/fold-backend-assignment
+   ```
 
 2. Install all dependencies –
 
-    ```bash
-    npm i
-    ```
+   ```bash
+   npm i
+   ```
 
 3. To run and develop locally –
 
-    ```bash
-    npm run dev
-    ```
+   ```bash
+   npm run dev
+   ```
 
-    > **Note**
+   > **Note**
 
-    > Note that this _does_ provision everything to AWS, with a live reloading connection set up that proxies all logs to your local console. When you are ready to deploy to production, these same resources are updated accordingly.
+   > Note that this _does_ provision everything to AWS, with a live reloading connection set up that proxies all logs to your local console. When you are ready to deploy to production, these same resources are updated accordingly.
 
 4. (Optional) To deploy to production –
 
-    ```bash
-    npm run deploy
-    ```
+   ```bash
+   npm run deploy
+   ```
 
 5. (Optional) To tear down everything –
 
-    ```bash
-    npm run remove
-    ```
+   ```bash
+   npm run remove
+   ```
 
 ## Final Implementation
 
@@ -119,7 +119,7 @@ Once this is working, we build a Lambda API that queries OpenSearch according to
 
 2. AWS DMS is configured to continously replicate changes on PostgreSQL ("source") to a Kinesis data stream ("target").
 
-    The AWS DMS replication instance is currently set up manually because of a long-standing Terraform (or perhaps AWS) bug – see https://github.com/hashicorp/terraform-provider-aws/issues/7602
+   The AWS DMS replication instance is currently set up manually because of a long-standing Terraform (or perhaps AWS) bug – see https://github.com/hashicorp/terraform-provider-aws/issues/7602
 
 3. The DMS target has a Lambda handler function that decisions each CDC record from DMS and syncs them to OpenSearch.
 
@@ -135,22 +135,21 @@ Once this is working, we build a Lambda API that queries OpenSearch according to
 
 3. Start reading about and setting up DMS (~4 hours).
 
-    1. Set up RDS (~ 15 minutes).
+   1. Set up RDS (~ 15 minutes).
 
-    2. Set up DMS source & target endpoints and replicator instance manually and test them out (~ 2 hours).
+   2. Set up DMS source & target endpoints and replicator instance manually and test them out (~ 2 hours).
 
-        a. Turn on logical replication on RDS for DMS.
+      a. Turn on logical replication on RDS for DMS.
 
-        b. Create PG source endpoint and make sure it can connect.
+      b. Create PG source endpoint and make sure it can connect.
 
-        c. Create OpenSearch target endpoint and make sure it can connect.
+      c. Create OpenSearch target endpoint and make sure it can connect.
 
-        d. Create replication task that connects source endpoint to target endpoint.
+      d. Create replication task that connects source endpoint to target endpoint.
 
-    3. SNAG: DMS engine 3.4.7 would not work correctly with security boundaries. (~2 hours).
-    
-        FIX: Downgrade to 3.4.6 means we need to downgrade PostgreSQL to 13.x as well, as support for PostgreSQL 14.x was added only in DMS engine 3.4.7 – see https://docs.aws.amazon.com/dms/latest/userguide/CHAP_ReleaseNotes.html#CHAP_ReleaseNotes.DMS346 (~ 2 hours).
+   3. SNAG: DMS engine 3.4.7 would not work correctly with security boundaries. (~2 hours).
 
+      FIX: Downgrade to 3.4.6 means we need to downgrade PostgreSQL to 13.x as well, as support for PostgreSQL 14.x was added only in DMS engine 3.4.7 – see https://docs.aws.amazon.com/dms/latest/userguide/CHAP_ReleaseNotes.html#CHAP_ReleaseNotes.DMS346 (~ 2 hours).
 
 ### Day 2 (2023 March 07)
 
@@ -158,19 +157,19 @@ Once this is working, we build a Lambda API that queries OpenSearch according to
 
 2. Quick spike of DMS using new infra brought up by SST stack (~3 hours).
 
-    Had to adjust VPC and security groups.
+   Had to adjust VPC and security groups.
 
-    SNAG: Hit a Terraform (or is it AWS?) bug – see https://github.com/hashicorp/terraform-provider-aws/issues/7602. Basically Terraform would keep placing the DMS replicator task in the default VPC and not the one we created.
+   SNAG: Hit a Terraform (or is it AWS?) bug – see https://github.com/hashicorp/terraform-provider-aws/issues/7602. Basically Terraform would keep placing the DMS replicator task in the default VPC and not the one we created.
 
-    ~~FIX~~ WORKAROUND: For now skip DMS replication instance provisioning via CDK/SST and do it manually.
+   ~~FIX~~ WORKAROUND: For now skip DMS replication instance provisioning via CDK/SST and do it manually.
 
 3. Turn on replication (~1 hour).
 
-    Tried to write a initializer script that would automatically install the `pglogical` extension on RDS.
+   Tried to write a initializer script that would automatically install the `pglogical` extension on RDS.
 
-    SNAG: Took too long, especially with RDS creation/re-creation cycles.
+   SNAG: Took too long, especially with RDS creation/re-creation cycles.
 
-    ~~FIX~~ WORKROUND: The extension installation is being done manually via directly-executed SQL.
+   ~~FIX~~ WORKROUND: The extension installation is being done manually via directly-executed SQL.
 
 4. Revisit previous assumptions (~30 minutes).
 
@@ -178,14 +177,14 @@ Once this is working, we build a Lambda API that queries OpenSearch according to
 
 1. Set up OpenSearch domain in SST stack (~45 minutes).
 
-    Had to adjust/re-adjust the fine-grained access policies so that CloudFormation would agree to spin up the domain.
+   Had to adjust/re-adjust the fine-grained access policies so that CloudFormation would agree to spin up the domain.
 
 2. Write core logic to filter DMS public schema updates and write them to OpenSearch as documents (~ 2 hours).
 
 3. Figure out how to cross-join data across indexes (~1 hour).
 
-    SNAG: Some of the documentation is out of date, but from what I can gather, for cross-index join queries to work (previously called relationships to model, well, relationships), looks like a mapping should be set up – https://www.elastic.co/guide/en/elasticsearch/reference/current/joining-queries.html
+   SNAG: Some of the documentation is out of date, but from what I can gather, for cross-index join queries to work (previously called relationships to model, well, relationships), looks like a mapping should be set up – https://www.elastic.co/guide/en/elasticsearch/reference/current/joining-queries.html
 
-    Looks like I might not have enough time to do this.
+   Looks like I might not have enough time to do this.
 
 4. Record demo video (~10 minutes).

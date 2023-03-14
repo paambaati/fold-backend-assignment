@@ -1,12 +1,12 @@
 {
-    "extends": "@tsconfig/node16/tsconfig.json",
-    "compilerOptions": {
-        "module": "esnext",
-        "baseUrl": ".",
-        "paths": {
-            "@fold-backend/core/*": [
-                "../core/src/*"
-            ]
-        }
+  "extends": "@tsconfig/node16/tsconfig.json",
+  "compilerOptions": {
+    "module": "esnext",
+    "baseUrl": ".",
+    "paths": {
+      "@fold-backend/core/*": [
+        "../core/src/*"
+      ]
     }
+  }
 }

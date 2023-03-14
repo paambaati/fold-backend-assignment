@@ -1,17 +1,17 @@
 {
-    "name": "@fold-backend/rds-init-trigger",
-    "version": "1.0.0",
-    "description": "SQL scripts + code for initializing PostgreSQL RDS instance",
-    "main": "index.mjs",
-    "type": "module",
-    "license": "ISC",
-    "scripts": {
-        "lockgen": "npm install --package-lock-only"
-    },
-    "dependencies": {
-        "@aws-sdk/client-secrets-manager": "3.290.0",
-        "p-timeout": "6.1.1",
-        "postgres": "3.3.4",
-        "zod": "3.21.4"
-    }
+  "name": "@fold-backend/rds-init-trigger",
+  "version": "1.0.0",
+  "description": "SQL scripts + code for initializing PostgreSQL RDS instance",
+  "main": "index.mjs",
+  "type": "module",
+  "license": "ISC",
+  "scripts": {
+    "lockgen": "npm install --package-lock-only"
+  },
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "3.290.0",
+    "p-timeout": "6.1.1",
+    "postgres": "3.3.4",
+    "zod": "3.21.4"
+  }
 }

@@ -1,14 +1,14 @@
 {
-    "name": "@fold-backend/core",
-    "version": "0.0.0",
-    "type": "module",
-    "scripts": {
-        "test": "sst bind vitest",
-        "typecheck": "tsc -noEmit"
-    },
-    "devDependencies": {
-        "vitest": "0.29.2",
-        "@types/node": "18.15.3",
-        "sst": "2.1.26"
-    }
+  "name": "@fold-backend/core",
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "sst bind vitest",
+    "typecheck": "tsc -noEmit"
+  },
+  "devDependencies": {
+    "vitest": "0.29.2",
+    "@types/node": "18.15.3",
+    "sst": "2.1.26"
+  }
 }
