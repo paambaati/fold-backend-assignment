@@ -1,4 +1,5 @@
 import got from 'got';
+import { z } from 'zod';
 import { getCredentials } from './utils/get-secret';
 import type { SearchResponse } from 'elasticsearch';
 import type { APIGatewayProxyHandlerV2 } from 'aws-lambda';
@@ -16,10 +17,15 @@ const request = got.extend({
     responseType: 'json',
 });
 
+const validStringSchema = z.string().nonempty();
+const envSchema = z.object({
+    OPENSEARCH_DOMAIN_ENDPOINT: validStringSchema,
+    OPENSEARCH_MASTER_CREDENTIALS_SECRET_ID: validStringSchema,
+});
+
 export const main: APIGatewayProxyHandlerV2 = async (_event) => {
-    const osEndpoint = process.env.OPENSEARCH_DOMAIN_ENDPOINT;
-    const osCredentialsSecretId = process.env.OPENSEARCH_MASTER_CREDENTIALS_SECRET_ID as string;
-    const { username, password } = await getCredentials(osCredentialsSecretId);
+    const { OPENSEARCH_DOMAIN_ENDPOINT: osEndpoint, OPENSEARCH_MASTER_CREDENTIALS_SECRET_ID: osSecretId } = envSchema.parse(process.env);
+    const { username, password } = await getCredentials(osSecretId);
     const osIndex = 'projects' as const
 
     const url = `https://${osEndpoint}/${osIndex}/_search?pretty=true&q=*:*`;

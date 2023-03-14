@@ -1,4 +1,5 @@
 import got, { type Method } from 'got';
+import { z } from 'zod';
 import { getCredentials } from './utils/get-secret';
 import type { KinesisStreamHandler } from 'aws-lambda';
 
@@ -22,6 +23,12 @@ export interface DMSCDCData {
 const request = got.extend({
     throwHttpErrors: true,
     responseType: 'json',
+});
+
+const validStringSchema = z.string().nonempty();
+const envSchema = z.object({
+    OPENSEARCH_DOMAIN_ENDPOINT: validStringSchema,
+    OPENSEARCH_MASTER_CREDENTIALS_SECRET_ID: validStringSchema,
 });
 
 const osMethodOperationMap: Record<DMSCDCData['metadata']['operation'][number], Method> = {
@@ -51,9 +58,8 @@ export const main: KinesisStreamHandler = async (event) => {
         }
     }
     
-    const osEndpoint = process.env.OPENSEARCH_DOMAIN_ENDPOINT;
-    const osCredentialsSecretId = process.env.OPENSEARCH_MASTER_CREDENTIALS_SECRET_ID as string;
-    const { username, password } = await getCredentials(osCredentialsSecretId);
+    const { OPENSEARCH_DOMAIN_ENDPOINT: osEndpoint, OPENSEARCH_MASTER_CREDENTIALS_SECRET_ID: osSecretId } = envSchema.parse(process.env);
+    const { username, password } = await getCredentials(osSecretId);
     const osOps = cdcRecords.flatMap(record => {
         const osIndex = record.metadata['table-name'];
         const recordId = record.data.id as number;
@@ -82,7 +88,7 @@ export const main: KinesisStreamHandler = async (event) => {
     });
 
     if (osOps.length) {
-        console.info(`Going to execute ${osOps.length} operation(s) on OpenSearch...`);
+        console.info(`Going to execute ${osOps.length} operation(s) (out of ${cdcRecords.length} records total) on OpenSearch...`);
         const osResults = await Promise.all(osOps.map(_ => _.operation));
         console.info(`Finished executing ${osResults.length} operation(s) on OpenSearch!`);
         for (const [index, osResult] of osResults.entries()) {
