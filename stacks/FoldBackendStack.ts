@@ -29,9 +29,7 @@ export function FoldBackendStack({ app, stack }: StackContext) {
     });
 
     if (app.stage !== 'prod') {
-        // TODO: remove this and use DESTORY for all non-prod stuff.
-        app.setDefaultRemovalPolicy(RemovalPolicy.RETAIN);
-        // app.setDefaultRemovalPolicy(RemovalPolicy.DESTROY);
+        app.setDefaultRemovalPolicy(RemovalPolicy.DESTROY);
     }
 
     if (IS_LOCAL) {
