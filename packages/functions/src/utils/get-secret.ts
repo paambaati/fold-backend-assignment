@@ -2,15 +2,15 @@ import got from 'got';
 import { SecretsManagerClient, GetSecretValueCommand, type GetSecretValueCommandInput, type GetSecretValueCommandOutput } from '@aws-sdk/client-secrets-manager';
 import type { MergeExclusive } from 'type-fest'
 
-const request = got.extend({
-    throwHttpErrors: true,
-    responseType: 'json',
-});
-
 interface Credentials { 
     username: string
     password: string
 }
+
+const request = got.extend({
+    throwHttpErrors: true,
+    responseType: 'json',
+});
 
 const getSecretFromSecretsCache = async (sessionToken: string, secretsPort: number, secretId: string, version?: MergeExclusive<{versionId: string}, {versionStage: string}>): Promise<string | undefined> => {
     const baseUrl = new URL(`http://localhost:${secretsPort}/secretsmanager/get?secretId=${secretId}`);
