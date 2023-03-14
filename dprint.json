@@ -16,6 +16,7 @@
   "excludes": [
     "**/node_modules",
     "**/*-lock.json",
+    "cdk.context.json",
     ".sst/**/*",
     ".build/**/*"
   ],
