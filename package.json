@@ -5,7 +5,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "sst dev",
+    "dev": "sst dev --rollback=false",
     "build": "sst build",
     "deploy": "sst deploy",
     "remove": "sst remove",
@@ -22,12 +22,13 @@
   "homepage": "https://github.com/paambaati/fold-pg-es-sync-api#readme",
   "devDependencies": {
     "@tsconfig/node16": "1.0.3",
-    "@types/aws-lambda": "8.10.111",
+    "@types/aws-lambda": "8.10.112",
     "aws-cdk-lib": "2.62.2",
-    "constructs": "10.1.273",
-    "dprint": "0.34.5",
+    "constructs": "10.1.277",
+    "dprint": "0.35.3",
     "kysely": "0.23.5",
-    "sst": "2.1.23",
+    "sst": "2.1.26",
+    "sync-request": "6.1.0",
     "typescript": "4.9.5"
   },
   "workspaces": [
